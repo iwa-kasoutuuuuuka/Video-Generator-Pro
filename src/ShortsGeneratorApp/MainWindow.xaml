@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ShortsGeneratorApp"
         mc:Ignorable="d"
-        Title="Shorts Video Generator PRO v1.7.4 [OFFLINE]" Height="950" Width="1300"
+        Title="Shorts Video Generator PRO v1.8.1 [OFFLINE]" Height="950" Width="1300"
         Background="#05070A" Foreground="#F8FAFC"
         WindowStartupLocation="CenterScreen"
         Icon="app_icon.png">

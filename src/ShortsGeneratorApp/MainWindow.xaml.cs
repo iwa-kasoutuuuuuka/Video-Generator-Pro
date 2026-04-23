@@ -43,7 +43,7 @@ namespace ShortsGeneratorApp
                     GlobalFFOptions.Configure(options => options.BinaryFolder = AppDomain.CurrentDomain.BaseDirectory);
                 }
 
-                this.Title = "Shorts Video Generator PRO v1.7.5 [OFFLINE]";
+                this.Title = "Shorts Video Generator PRO v1.8.1 [OFFLINE]";
                 
                 // Startup check for dependencies
                 Dispatcher.BeginInvoke(new Action(async () => {
