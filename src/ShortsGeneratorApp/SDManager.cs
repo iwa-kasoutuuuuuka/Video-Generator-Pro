@@ -42,7 +42,7 @@ namespace ShortsGeneratorApp
                     .WithSteps(steps)
                     .WithTxtCfg(cfgScale);
 
-                using (var image = _model.GenerateImage(param))
+                var image = _model.GenerateImage(param);
                 {
                     // Manual conversion to byte[] (PNG) via Bitmap
                     var pixels = image.ToArray();

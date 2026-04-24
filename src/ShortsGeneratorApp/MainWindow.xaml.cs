@@ -523,6 +523,8 @@ namespace ShortsGeneratorApp
             {
                 LoadingOverlay.Visibility = Visibility.Collapsed;
             }
+        }
+
         private void CleanupTempFolders()
         {
             try {
