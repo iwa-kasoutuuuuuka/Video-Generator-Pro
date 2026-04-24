@@ -8,41 +8,46 @@
 - **開発言語**: C# 13
 - **動作環境**: Windows 10/11 (64bit)
 - **推奨ハードウェア**: 
-    - CPU: 4コア以上
-    - RAM: 8GB以上
-    - GPU: NVIDIA GTX 1650 (VRAM 4GB) 以上推奨 (CPUのみでも動作可能)
+    - CPU: 8コア以上 (並列レンダリングに最適)
+    - RAM: 16GB以上
+    - GPU: NVIDIA RTX 3060 (VRAM 12GB) 以上推奨 (SDXL/Stable Diffusionの高速動作に必要)
 
-## 3. 使用技術・ライブラリ
-### 3.1 ソフトウェア・コンポーネント
+## 3. レンダリング・パイプライン (v1.8.2 以降)
+本バージョンでは、生成速度を最大化するため「非同期ストリーミング・パイプライン」を採用しています。
+
+### 3.1 処理フロー
+従来の「バッチ方式（全素材完成後に結合）」から「パイプライン方式」へ移行しました。
+1. **シーン解析**: LLMがブログテキストを複数のシーンに分割。
+2. **アセット生成 (並列)**: 各シーンごとに以下のタスクを同時に開始。
+    - **TTS (音声合成)**: システム音声エンジンによるWave出力。
+    - **SD (画像生成)**: Stable Diffusion によるプロンプトベースの画像生成。
+3. **即時クリップレンダリング**: 特定のシーンの音声と画像が揃い次第、他のシーンの生成を待たずに FFmpeg による中間 MP4 クリップのレンダリングを開始。
+4. **最終結合**: 全てのクリップが完成した瞬間に高速結合処理を実行。
+
+### 3.2 リソース管理 (SemaphoreSlim)
+システムリソース（VRAM/CPU）の競合を防ぐため、グローバルなセマフォ制御を導入しています。
+- **SD セマフォ (スロット数: 1)**: VRAM消費を抑えるため、画像生成は常に 1 実行に制限。
+- **Render セマフォ (スロット数: 4)**: CPUおよびディスクI/Oのバランスを考慮し、FFmpeg の並列実行を 4 まで許可。
+- **Speech セマフォ (スロット数: 1)**: Windows 共通の音声合成エンジンの安定性を確保するため 1 実行に制限。
+
+## 4. 使用技術・ライブラリ
+### 4.1 ソフトウェア・コンポーネント
 - **FFmpeg**: 動画・音声のエンコードおよびミキシング。
-    - 公式サイト: [https://ffmpeg.org/](https://ffmpeg.org/)
-- **LLamaSharp**: ローカルLLM (GGUF形式) の C# 推論エンジン。
-    - リポジトリ: [https://github.com/SciSharp/LLamaSharp](https://github.com/SciSharp/LLamaSharp)
+- **LLamaSharp**: ローカルLLM (GGUF形式) の C# 推論エンジン。 (Vulkan/CUDAバックエンド対応)
 - **FFMpegCore**: .NET用 FFmpeg ラッパー。
-- **Newtonsoft.Json**: JSONデータのシリアライズ/デシリアライズ。
+- **StableDiffusion.NET**: Stable Diffusion の C# 実装。
+- **Newtonsoft.Json**: 構造化データの処理。
 
-### 3.2 AIモデル
-- **LLM (Text Generation)**:
-    - Phi-3 Mini (Microsoft) [MIT License]
-    - Gemma-2-2B (Google) [Gemma Terms of Use]
-- **Image Generation**:
-    - Stable Diffusion v1.5 [CreativeML Open RAIL-M]
-- **TTS (Text-to-Speech)**:
-    - Windows System Speech (SAPI5)
+### 4.2 AIモデル
+- **LLM**: Phi-3 Mini, Gemma-2-2B, Llama-3 等 (GGUF形式)
+- **Image**: Stable Diffusion v1.5 / v2.1 / XL (safetensors形式)
+- **TTS**: Windows System Speech (SAPI5)
 
-## 4. フォルダ構成 (GitHub用)
-```
-ShortsGeneratorApp/
-├── bin/                 # 実行バイナリ、FFmpeg.exe
-├── docs/                # ドキュメント (本資料、取扱説明書)
-├── Models/              # AIモデル格納用 (ユーザーにて配置)
-├── src/                 # ソースコード
-│   └── ShortsGeneratorApp/
-├── ShortsGeneratorApp.sln
-├── .gitignore           # Modelsやbin/等のバイナリを除外
-└── README.md            # プロジェクト概要と導入手順
-```
+## 5. ロギングシステム
+デバッグおよび進捗確認のため、詳細なログを記録しています。
+- **保存先**: `[アプリ実行ディレクトリ]/app_log.txt`
+- **内容**: AI推論時間、素材生成の成功/失敗、FFmpegのコマンドログ、クリップ合成の進捗。
 
-## 5. ライセンス
+## 6. ライセンス
 本プロジェクトのソースコードは MIT ライセンスの下で提供されます。
 使用している外部ライブラリおよびAIモデルのライセンスについては、各提供元の規約を遵守してください。
