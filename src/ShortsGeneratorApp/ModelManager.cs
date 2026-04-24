@@ -70,12 +70,18 @@ namespace ShortsGeneratorApp
                     string extractTarget = AppDomain.CurrentDomain.BaseDirectory;
                     System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, extractTarget, true);
                     
-                    // piper/piper.exe を BaseDirectory にコピー
-                    string piperInSubDir = Path.Combine(extractTarget, "piper", "piper.exe");
-                    string piperDest = Path.Combine(extractTarget, "piper.exe");
-                    if (File.Exists(piperInSubDir) && !File.Exists(piperDest))
+                    // piper/ 内のすべてのファイル（exe, dll等）を BaseDirectory にコピー
+                    string piperSubDir = Path.Combine(extractTarget, "piper");
+                    if (Directory.Exists(piperSubDir))
                     {
-                        File.Copy(piperInSubDir, piperDest);
+                        foreach (var file in Directory.GetFiles(piperSubDir))
+                        {
+                            string fileName = Path.GetFileName(file);
+                            string dest = Path.Combine(extractTarget, fileName);
+                            File.Copy(file, dest, true);
+                        }
+                        // コピー後はサブフォルダを削除
+                        try { Directory.Delete(piperSubDir, true); } catch { }
                     }
                     
                     File.Delete(zipPath);
