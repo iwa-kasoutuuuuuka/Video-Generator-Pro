@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ShortsGeneratorApp"
         mc:Ignorable="d"
-        Title="Shorts Video Generator PRO v1.8.2 [OFFLINE]" Height="950" Width="1300"
+        Title="Shorts Video Generator PRO v2.6 [Premium Edition]" Height="900" Width="1250"
         Background="#05070A" Foreground="#F8FAFC"
         WindowStartupLocation="CenterScreen"
         Icon="app_icon.png">
@@ -170,6 +170,9 @@
                     <TextBlock Text="Visual Generation (SD)" Foreground="#94A3B8" FontSize="12" Margin="0,0,0,5" />
                     <ComboBox x:Name="SdModelCombo" Background="#0F172A" Foreground="White" Margin="0,0,0,15" />
 
+                    <TextBlock Text="Voice Model (Piper/高音質)" Foreground="#94A3B8" FontSize="12" Margin="0,0,0,5" />
+                    <ComboBox x:Name="VoiceModelCombo" Background="#0F172A" Foreground="White" Margin="0,0,0,15" />
+
                     <CheckBox x:Name="UseGpuCheck" Content="GTX 1650 (CUDA) を優先する" IsChecked="True" Foreground="White" />
                     <TextBlock Text="※VRAM 4GB以下は軽量モデル推奨" Foreground="#64748B" FontSize="10" Margin="20,5,0,10" />
 
@@ -209,6 +212,12 @@
                         </Button.Resources>
                     </Button>
                     <TextBlock x:Name="OutputPathTextBlock" Text="未設定 (デスクトップに保存されます)" Foreground="#64748B" FontSize="10" Margin="5,5,0,0" TextWrapping="Wrap" />
+
+                    <TextBlock Text="Background Music (BGM)" Foreground="#94A3B8" FontSize="12" Margin="0,15,0,5" />
+                    <DockPanel>
+                        <Button Content="🎵" Width="30" Height="35" Background="#334155" Foreground="White" BorderThickness="0" Click="BgmBrowse_Click" Margin="0,0,5,0"/>
+                        <ComboBox x:Name="BgmCombo" Background="#0F172A" Foreground="White" Height="35" />
+                    </DockPanel>
                 </StackPanel>
             </Border>
 
@@ -222,10 +231,23 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="Script Input" FontSize="18" FontWeight="Bold" Margin="0,0,0,10" />
+                    <TextBlock Grid.Row="0" Text="アルゴリズム最適化AI 入力フォーム" FontSize="18" FontWeight="Bold" Margin="0,0,0,10" Foreground="Gold" />
                     
                     <TextBox Grid.Row="1" x:Name="InputTextBox" Style="{StaticResource ModernTextBox}" 
-                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                             ToolTip="ニュースURL（複数可）または動画にしたい文章を入力してください。"/>
+                    <TextBlock Grid.Row="1" Text="ここにURLや本文を入力してください（複数URL可）" IsHitTestVisible="False" Foreground="Gray" Opacity="0.5" VerticalAlignment="Top" Margin="10,10,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=InputTextBox}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
 
                     <StackPanel Grid.Row="2" Margin="0,15">
                         <Grid>
@@ -270,7 +292,18 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10">
-                    <TextBlock x:Name="StatusText" Text="モデルをロードして開始してください" FontSize="16" Foreground="#94A3B8" />
+                    <Border Background="#1E293B" Padding="10,5" CornerRadius="15" Margin="0,0,10,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="GpuStatusLight" Width="8" Height="8" Fill="Gray" Margin="0,0,5,0"/>
+                            <TextBlock x:Name="GpuStatusText" Text="GPU: OFF" FontSize="12" Foreground="White"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="#1E293B" Padding="10,5" CornerRadius="15">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="PiperStatusLight" Width="8" Height="8" Fill="Gray" Margin="0,0,5,0"/>
+                            <TextBlock x:Name="PiperStatusText" Text="Piper: OFF" FontSize="12" Foreground="White"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">

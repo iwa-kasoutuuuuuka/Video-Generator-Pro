@@ -1,61 +1,73 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Threading.Tasks;
 using LLama;
 using LLama.Common;
-using Newtonsoft.Json;
 
 namespace ShortsGeneratorApp
 {
-    public class LocalGeneratorEngine
+    public class LocalGeneratorEngine : IDisposable
     {
         private LLamaWeights? _weights;
-        private LLamaContext? _context;
-        private InteractiveExecutor? _executor;
         private string? _currentModelPath;
+        private int _lastGpuLayers = 10;
 
         public async Task InitializeAsync(string modelPath, int gpuLayers = 10)
         {
-            if (_currentModelPath == modelPath && _weights != null) return;
+            if (_currentModelPath == modelPath && _weights != null && _lastGpuLayers == gpuLayers) return;
 
             Dispose();
 
+            _lastGpuLayers = gpuLayers;
             var parameters = new ModelParams(modelPath)
             {
-                ContextSize = 1024, // Reduced context for stability
-                GpuLayerCount = gpuLayers // Custom layer count (0 = CPU only)
+                ContextSize = 4096, 
+                GpuLayerCount = gpuLayers 
             };
             
             _weights = await Task.Run(() => LLamaWeights.LoadFromFile(parameters));
-            _context = _weights.CreateContext(parameters);
-            _executor = new InteractiveExecutor(_context);
             _currentModelPath = modelPath;
         }
 
         public async Task<string> GenerateResponseAsync(string prompt)
         {
-            if (_executor == null) return "Model not initialized.";
+            if (_weights == null || string.IsNullOrEmpty(_currentModelPath)) 
+                return "Model not initialized.";
 
+            // Use StatelessExecutor to prevent context build-up (Fixes NoKvSlot)
+            var parameters = new ModelParams(_currentModelPath)
+            {
+                ContextSize = 4096,
+                GpuLayerCount = _lastGpuLayers
+            };
+
+            var executor = new StatelessExecutor(_weights, parameters);
+            
             var inferenceParams = new InferenceParams()
             {
-                MaxTokens = 1024,
-                Temperature = 0.1f, // Make it more deterministic
-                AntiPrompts = new List<string> { "User:" }
+                MaxTokens = 2048,
+                Temperature = 0.7f,
+                TopP = 0.95f,
+                AntiPrompts = new List<string> { "User:", "###", "[INPUT]" }
             };
 
             string response = "";
-            await foreach (var text in _executor.InferAsync(prompt, inferenceParams))
-            {
-                response += text;
+            try {
+                await foreach (var text in executor.InferAsync(prompt, inferenceParams))
+                {
+                    response += text;
+                }
+            } catch (Exception ex) {
+                return $"[Error] AI推論中にエラーが発生しました: {ex.Message}";
             }
+            
             return response;
         }
 
         public void Dispose()
         {
-            _context?.Dispose();
             _weights?.Dispose();
+            _weights = null;
         }
     }
 }

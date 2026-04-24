@@ -4,9 +4,10 @@ using System.IO;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Speech.Synthesis;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using FFMpegCore;
+using FFMpegCore.Enums;
 
 namespace ShortsGeneratorApp
 {
@@ -14,80 +15,64 @@ namespace ShortsGeneratorApp
     {
         private SDManager? _sdManager;
         private Action<string>? _logger;
+        private string _voiceModelPath = "";
 
-        // Shared semaphores to protect system resources globally
-        private static readonly System.Threading.SemaphoreSlim _sdSemaphore = new System.Threading.SemaphoreSlim(1); // VRAM Protection
-        private static readonly System.Threading.SemaphoreSlim _renderSemaphore = new System.Threading.SemaphoreSlim(4); // FFmpeg CPU/IO balance
-        private static readonly System.Threading.SemaphoreSlim _speechSemaphore = new System.Threading.SemaphoreSlim(1); // Speech Engine Protection
+        private static readonly System.Threading.SemaphoreSlim _sdSemaphore = new System.Threading.SemaphoreSlim(1);
+        private static readonly System.Threading.SemaphoreSlim _renderSemaphore = new System.Threading.SemaphoreSlim(4);
+        private static readonly System.Threading.SemaphoreSlim _speechSemaphore = new System.Threading.SemaphoreSlim(1);
 
         public void SetSDManager(SDManager sdManager) => _sdManager = sdManager;
         public void SetLogger(Action<string> logger) => _logger = logger;
+        public void SetVoiceModel(string path) => _voiceModelPath = path;
 
         private void Log(string msg) => _logger?.Invoke($"[Renderer] {msg}");
 
-        public async Task RenderVideoAsync(GenerationResult result, Variation variation, string outputPath)
+        public async Task RenderVideoV2Async(V2GenerationResult result, string outputPath, string bgmPath = "")
         {
-            string resolution = (result.Orientation?.Contains("Horizontal") == true) ? "1920x1080" : "1080x1920";
-            string sizeArg = resolution.Replace("x", ":");
-            int w = (resolution == "1920x1080") ? 1920 : 1080;
-            int h = (resolution == "1920x1080") ? 1080 : 1920;
-
-            string tempDir = Path.Combine(Path.GetTempPath(), "ShortsGen_" + Guid.NewGuid().ToString());
+            string tempDir = Path.Combine(Path.GetTempPath(), "ShortsGenV2_" + Guid.NewGuid().ToString());
             Directory.CreateDirectory(tempDir);
 
-            Log($"Starting render for variation: {variation.VariationId} ({variation.Scenes.Count} scenes)");
+            Log($"Starting v2.2 Pro Render... ({result.Scenes.Count} scenes)");
 
             try
             {
                 var clipTasks = new List<Task<string>>();
+                int w = 1080;
+                int h = 1920;
 
-                for (int i = 0; i < variation.Scenes.Count; i++)
+                // Detect GPU for hardware acceleration
+                string videoCodec = DetectBestCodec();
+                Log($"Using Video Codec: {videoCodec}");
+
+                for (int i = 0; i < result.Scenes.Count; i++)
                 {
                     int index = i;
-                    var scene = variation.Scenes[i];
+                    var scene = result.Scenes[i];
                     
                     clipTasks.Add(Task.Run(async () => {
                         string audioPath = Path.Combine(tempDir, $"scene_{index}.wav");
                         string imagePath = Path.Combine(tempDir, $"scene_{index}.png");
                         string clipPath = Path.Combine(tempDir, $"clip_{index}.mp4");
 
-                        // 1. Parallel asset generation
-                        var audioTask = Task.Run(async () => {
-                            await SynthesizeSpeechAsync(scene.Narration, audioPath);
-                        });
-
-                        var imageTask = Task.Run(async () => {
-                            if (_sdManager != null && !string.IsNullOrEmpty(scene.VisualPrompt))
-                            {
-                                await _sdSemaphore.WaitAsync();
-                                try {
-                                    byte[] imgData = await _sdManager.GenerateImageAsync(scene.VisualPrompt, width: w, height: h);
-                                    await File.WriteAllBytesAsync(imagePath, imgData);
-                                } catch (Exception ex) {
-                                    Log($"SD Generation failed for scene {index}: {ex.Message}. Falling back to placeholder.");
-                                    RenderFrame(scene, imagePath, w, h);
-                                } finally {
-                                    _sdSemaphore.Release();
-                                }
-                            }
-                            else {
-                                RenderFrame(scene, imagePath, w, h);
-                            }
-                        });
+                        // 1. Parallel asset generation with retries
+                        var audioTask = SynthesizeSpeechPiperAsync(scene.Narration, audioPath);
+                        var imageTask = GenerateImageWithRetryAsync(scene, imagePath, w, h, 2);
 
                         await Task.WhenAll(audioTask, imageTask);
 
-                        // 2. Render Clip
+                        // 2. Render Clip with dynamic zoompan + audio fade
                         await _renderSemaphore.WaitAsync();
                         try {
-                            Log($"Rendering clip {index}/{variation.Scenes.Count}...");
                             await FFMpegArguments
                                 .FromFileInput(imagePath, true, options => options.WithCustomArgument("-loop 1"))
                                 .AddFileInput(audioPath)
                                 .OutputToFile(clipPath, true, options => options
-                                    .WithVideoCodec("libx264")
+                                    .WithVideoCodec(videoCodec)
                                     .WithAudioCodec("aac")
-                                    .WithCustomArgument($"-vf \"scale={sizeArg}:force_original_aspect_ratio=decrease,pad={sizeArg}:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -shortest"))
+                                    .WithCustomArgument(videoCodec.Contains("nvenc") ? "-preset p4" : "-preset veryfast")
+                                    // AF: afade to prevent pops, VF: zoompan
+                                    .WithCustomArgument($"-af \"afade=t=in:ss=0:d=0.1,afade=t=out:st=3:d=0.1\"") // st will be adjusted by -shortest
+                                    .WithCustomArgument($"-vf \"scale=2000:-1,zoompan=z='min(zoom+0.0015,1.3)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h},format=yuv420p\" -shortest"))
                                 .ProcessAsynchronously();
                             return clipPath;
                         } finally {
@@ -98,31 +83,161 @@ namespace ShortsGeneratorApp
 
                 var clips = await Task.WhenAll(clipTasks);
 
-                Log("Concatenating all clips...");
-                await Task.Run(() => FFMpeg.Join(outputPath, clips));
-                Log($"Video rendered successfully: {outputPath}");
+                // Create Concat List
+                string listPath = Path.Combine(tempDir, "list.txt");
+                File.WriteAllLines(listPath, Array.ConvertAll(clips, c => $"file '{c.Replace("\\", "/")}'"));
+
+                // Generate Advanced ASS Subtitles
+                string assPath = Path.Combine(tempDir, "subtitles.ass");
+                GenerateAssFile(result.Srt, assPath);
+                string escapedAssPath = assPath.Replace("\\", "/").Replace(":", "\\:");
+
+                Log("Applying Final Effects: Sidechain Ducking + ASS Subtitles...");
+
+                // Final Assembly with Sidechain Auto-Ducking and Faststart
+                var ffmpeg = FFMpegArguments.FromFileInput(listPath, false, options => options.WithCustomArgument("-f concat -safe 0"));
+                
+                string audioFilter = "loudnorm=I=-16:TP=-1.5:LRA=11";
+                if (File.Exists(bgmPath))
+                {
+                    ffmpeg.AddFileInput(bgmPath, true, options => options.WithCustomArgument("-stream_loop -1"));
+                    audioFilter = "[1:a]volume=0.2[bg];[0:a][bg]amix=inputs=2:duration=first[aout];[aout]loudnorm=I=-16:TP=-1.5:LRA=11";
+                }
+
+                await ffmpeg.OutputToFile(outputPath, true, options => options
+                        .WithVideoCodec(videoCodec)
+                        .WithAudioCodec("aac")
+                        .WithCustomArgument($"-filter_complex \"{audioFilter}\" -map 0:v -map [aout] -vf \"ass='{escapedAssPath}'\" -movflags +faststart")
+                        .WithCustomArgument(videoCodec.Contains("nvenc") ? "-preset p4" : "-preset fast"))
+                    .ProcessAsynchronously();
+
+                Log($"v2.5 Video rendered successfully: {outputPath}");
             }
             catch (Exception ex) {
-                Log($"CRITICAL ERROR during render: {ex.Message}");
+                Log($"CRITICAL ERROR: {ex.Message}");
                 throw;
             }
-            finally
-            {
+            finally {
                 try { Directory.Delete(tempDir, true); } catch { }
             }
         }
 
-        private async Task SynthesizeSpeechAsync(string text, string outputPath)
+        private async Task GenerateImageWithRetryAsync(V2Scene scene, string imagePath, int w, int h, int maxRetries)
         {
-            string textToSpeak = string.IsNullOrWhiteSpace(text) ? " " : text;
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try {
+                    await GenerateImageOrPlaceholderAsync(scene, imagePath, w, h);
+                    if (File.Exists(imagePath) && new FileInfo(imagePath).Length > 1000) return;
+                } catch {
+                    if (i == maxRetries - 1) throw;
+                }
+            }
+        }
 
+        private void GenerateAssFile(string srtContent, string outputPath)
+        {
+            // Simplified ASS generation: converts SRT blocks to ASS Dialogue
+            var header = @"[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,MS UI Gothic,85,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,3,2,10,10,400,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+";
+            // Use UTF-8 without BOM for ASS files
+            using (var sw = new StreamWriter(outputPath, false, new System.Text.UTF8Encoding(false)))
+            {
+                sw.Write(header);
+                // Basic SRT to ASS conversion logic
+                var lines = srtContent.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var block in lines)
+                {
+                    var parts = block.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2)
+                    {
+                        var timeMatch = System.Text.RegularExpressions.Regex.Match(parts[1], @"(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})");
+                        if (timeMatch.Success)
+                        {
+                            string start = timeMatch.Groups[1].Value.Replace(',', '.').Substring(1); // 00:00:00.00
+                            string end = timeMatch.Groups[2].Value.Replace(',', '.').Substring(1);
+                            string text = string.Join("\\N", parts.Skip(2)).Trim();
+                            sw.WriteLine($"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}");
+                        }
+                    }
+                }
+            }
+        }
+
+        private string DetectBestCodec()
+        {
+            try {
+                // Run a tiny test command to check for NVENC
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg.exe",
+                    Arguments = "-f lavfi -i color=c=black:s=64x64:d=0.1 -c:v h264_nvenc -f null -",
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var process = Process.Start(startInfo))
+                {
+                    process.WaitForExit();
+                    if (process.ExitCode == 0) return "h264_nvenc";
+                }
+            } catch { }
+            return "libx264"; 
+        }
+
+        private async Task SynthesizeSpeechPiperAsync(string text, string outputPath)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            
             await _speechSemaphore.WaitAsync();
             try {
+                string piperExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "piper.exe");
+                if (!File.Exists(piperExe)) {
+                    Log("Piper.exe not found! Falling back to System.Speech.");
+                    await SynthesizeSpeechLegacyAsync(text, outputPath);
+                    return;
+                }
+
+                if (!File.Exists(_voiceModelPath)) {
+                    Log("Voice model not found! Falling back to System.Speech.");
+                    await SynthesizeSpeechLegacyAsync(text, outputPath);
+                    return;
+                }
+
                 await Task.Run(() => {
-                    using (var synth = new SpeechSynthesizer())
+                    var startInfo = new ProcessStartInfo
                     {
-                        synth.SetOutputToWaveFile(outputPath);
-                        synth.Speak(textToSpeak);
+                        FileName = piperExe,
+                        Arguments = $"--model \"{_voiceModelPath}\" --output_file \"{outputPath}\"",
+                        RedirectStandardInput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using (var process = Process.Start(startInfo))
+                    {
+                        if (process != null) {
+                            try {
+                                process.StandardInput.Write(text);
+                                process.StandardInput.Close(); 
+                                if (!process.WaitForExit(60000)) { // 60s timeout
+                                    process.Kill();
+                                    Log("Piper timeout (60s)");
+                                }
+                            } catch (Exception ex) {
+                                Log($"Piper stream error: {ex.Message}");
+                            }
+                        }
                     }
                 });
             } finally {
@@ -130,38 +245,72 @@ namespace ShortsGeneratorApp
             }
         }
 
-        private void RenderFrame(Scene scene, string outputPath, int width, int height)
+        private async Task SynthesizeSpeechLegacyAsync(string text, string outputPath)
         {
-            using (var bitmap = new Bitmap(width, height))
+            await Task.Run(() => {
+                using (var synth = new System.Speech.Synthesis.SpeechSynthesizer()) {
+                    synth.SetOutputToWaveFile(outputPath);
+                    synth.Speak(text);
+                }
+            });
+        }
+
+        private async Task GenerateImageOrPlaceholderAsync(V2Scene scene, string imagePath, int w, int h)
+        {
+            if (_sdManager != null && !string.IsNullOrEmpty(scene.VisualPrompt))
+            {
+                await _sdSemaphore.WaitAsync();
+                try {
+                    byte[] imgData = await _sdManager.GenerateImageAsync(scene.VisualPrompt, width: w, height: h);
+                    await File.WriteAllBytesAsync(imagePath, imgData);
+                } catch {
+                    RenderPlaceholder(scene.Narration, imagePath, w, h);
+                } finally {
+                    _sdSemaphore.Release();
+                }
+            }
+            else {
+                RenderPlaceholder(scene.Narration, imagePath, w, h);
+            }
+        }
+
+        public async Task RenderThumbnailAsync(V2GenerationResult result, string bgImagePath, string outputPath)
+        {
+            int w = 1280;
+            int h = 720;
+            using (var bitmap = File.Exists(bgImagePath) ? new Bitmap(bgImagePath) : new Bitmap(w, h))
             using (var g = Graphics.FromImage(bitmap))
             {
-                // Background
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                string t1 = result.ThumbnailTexts.Count > 0 ? result.ThumbnailTexts[0] : "";
+                string t2 = result.ThumbnailTexts.Count > 1 ? result.ThumbnailTexts[1] : "";
+                DrawThumbnailText(g, t1, w, h * 0.2f, 80, Color.White, Color.Black);
+                DrawThumbnailText(g, t2, w, h * 0.5f, 60, Color.Yellow, Color.Black);
+                bitmap.Save(outputPath, ImageFormat.Jpeg);
+            }
+        }
+
+        private void DrawThumbnailText(Graphics g, string text, int w, float y, int fontSize, Color textColor, Color boxColor)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            using (var font = new Font("MS UI Gothic", fontSize, FontStyle.Bold))
+            {
+                var size = g.MeasureString(text, font);
+                float x = (w - size.Width) / 2;
+                using (var brush = new SolidBrush(Color.FromArgb(200, boxColor))) {
+                    g.FillRectangle(brush, x - 20, y - 10, size.Width + 40, size.Height + 20);
+                }
+                g.DrawString(text, font, Brushes.Black, x + 3, y + 3);
+                g.DrawString(text, font, new SolidBrush(textColor), x, y);
+            }
+        }
+
+        private void RenderPlaceholder(string text, string outputPath, int w, int h)
+        {
+            using (var bitmap = new Bitmap(w, h))
+            using (var g = Graphics.FromImage(bitmap)) {
                 g.Clear(Color.FromArgb(17, 25, 40));
-                
-                // Draw some abstract shapes for "visual"
-                var brush = new LinearGradientBrush(new Rectangle(0,0,width,height), Color.FromArgb(139, 92, 246), Color.FromArgb(236, 72, 153), 45f);
-                g.FillEllipse(brush, width * 0.1f, height * 0.2f, width * 0.8f, width * 0.8f);
-
-                // Visual Prompt
-                if (!string.IsNullOrEmpty(scene.VisualPrompt))
-                {
-                    var visualFont = new Font("Arial", 24, FontStyle.Italic);
-                    g.DrawString($"[Scene Content: {scene.VisualPrompt}]", visualFont, Brushes.LightCyan, new RectangleF(20, 20, width - 40, 300));
-                }
-
-                // Telop
-                string telopText = scene.GetTelopText();
-                if (!string.IsNullOrEmpty(telopText))
-                {
-                    var font = new Font("Arial", 60, FontStyle.Bold);
-                    var textSize = g.MeasureString(telopText, font);
-                    float x = (width - textSize.Width) / 2;
-                    float y = height * 0.85f;
-                    
-                    g.DrawString(telopText, font, Brushes.Black, x + 3, y + 3);
-                    g.DrawString(telopText, font, Brushes.White, x, y);
-                }
-
+                g.DrawString(text, new Font("Arial", 24), Brushes.Gray, new RectangleF(40, 40, w - 80, h - 80));
                 bitmap.Save(outputPath, ImageFormat.Png);
             }
         }

@@ -1,38 +1,34 @@
 # .gitignore for Shorts Video Generator PRO
+# ----------------------------------------
 
-# Build outputs
+# .NET / Visual Studio
 bin/
 obj/
-Publish/
-bin/Publish*/
-node_modules/
-archive/
-
-# Portable distribution (Exclude models and heavy assets)
-ShortsVideoGeneratorPro_v1.0_Portable/Models/
-ShortsVideoGeneratorPro_v1.0_Portable/ffmpeg.exe
-ShortsVideoGeneratorPro_v1.0_Portable/ffprobe.exe
-ShortsVideoGeneratorPro_v1.0_Portable/ShortsGeneratorApp.exe
-ShortsVideoGeneratorPro_v1.0_Portable/app_log.txt
-ShortsVideoGeneratorPro_v1.0_Portable/raw_ai_output.txt
-
-# Local settings and logs
-*.log
-raw_ai_output.txt
-app_settings.json
-
-# IDE files
-.vs/
-.vscode/
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
 
-# Packages
-packages/
-*.nupkg
+# AI Models (Heavy Files)
+Models/
+*.gguf
+*.safetensors
+*.onnx
+*.onnx.json
 
-# Temporary files
-temp/
-ShortsGen_*/
+# Dependencies / Tools
+ffmpeg.exe
+ffprobe.exe
+piper.exe
+piper/
+*.zip
+
+# App Data / Outputs
+BGM/
+VideoOutput/
+publish_temp/
+ShortsVideoGeneratorPro_v1.0_Portable/
+
+# System Files
+.DS_Store
+Thumbs.db

@@ -45,39 +45,37 @@ namespace ShortsGeneratorApp
                 var image = _model.GenerateImage(param);
                 
                 // Manual conversion to byte[] (PNG) via Bitmap
-                // image.ToArray() returns ColorRGB[] where ColorRGB is a 3-byte struct (R, G, B)
                 var pixels = image.ToArray();
-                int w = image.Width;
-                int h = image.Height;
-                
-                using (var bitmap = new Bitmap(w, h, PixelFormat.Format24bppRgb))
-                {
-                    var rect = new Rectangle(0, 0, w, h);
-                    var bmpData = bitmap.LockBits(rect, ImageLockMode.WriteOnly, bitmap.PixelFormat);
+                    int w = image.Width;
+                    int h = image.Height;
                     
-                    // Copy pixel data row by row to handle stride
-                    int bytesPerPixel = 3;
-                    byte[] rowData = new byte[w * bytesPerPixel];
-                    
-                    for (int y = 0; y < h; y++)
+                    using (var bitmap = new Bitmap(w, h, PixelFormat.Format24bppRgb))
                     {
-                        for (int x = 0; x < w; x++)
+                        var rect = new Rectangle(0, 0, w, h);
+                        var bmpData = bitmap.LockBits(rect, ImageLockMode.WriteOnly, bitmap.PixelFormat);
+                        
+                        int bytesPerPixel = 3;
+                        byte[] rowData = new byte[w * bytesPerPixel];
+                        
+                        for (int y = 0; y < h; y++)
                         {
-                            var color = pixels[y * w + x];
-                            rowData[x * 3 + 0] = color.B;
-                            rowData[x * 3 + 1] = color.G;
-                            rowData[x * 3 + 2] = color.R;
+                            for (int x = 0; x < w; x++)
+                            {
+                                var color = pixels[y * w + x];
+                                rowData[x * 3 + 0] = color.B;
+                                rowData[x * 3 + 1] = color.G;
+                                rowData[x * 3 + 2] = color.R;
+                            }
+                            IntPtr destRow = bmpData.Scan0 + (y * bmpData.Stride);
+                            Marshal.Copy(rowData, 0, destRow, rowData.Length);
                         }
-                        IntPtr destRow = bmpData.Scan0 + (y * bmpData.Stride);
-                        Marshal.Copy(rowData, 0, destRow, rowData.Length);
-                    }
-                    
-                    bitmap.UnlockBits(bmpData);
-                    
-                    using (var ms = new MemoryStream())
-                    {
-                        bitmap.Save(ms, ImageFormat.Png);
-                        return ms.ToArray();
+                        
+                        bitmap.UnlockBits(bmpData);
+                        
+                        using (var ms = new MemoryStream())
+                        {
+                            bitmap.Save(ms, ImageFormat.Png);
+                            return ms.ToArray();
                     }
                 }
             });
