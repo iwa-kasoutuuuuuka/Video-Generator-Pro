@@ -53,7 +53,7 @@ namespace ShortsGeneratorApp
                 }
 
                 _renderer.SetLogger(Log);
-                this.Title = "Shorts Video Generator PRO v2.0 [アルゴリズム最適化版]";
+                this.Title = "Shorts Video Generator PRO v2.6 [Premium Edition]";
                 
                 // Startup check for dependencies
                 Dispatcher.BeginInvoke(new Action(async () => {
@@ -115,7 +115,7 @@ namespace ShortsGeneratorApp
             string voicePath = Path.Combine(_modelManager.ModelsDir, defaultVoice.Path);
             if (!File.Exists(voicePath))
             {
-                var result = MessageBox.Show($"高品質音声モデル ({defaultVoice.Name}) が見つかりません。ダウンロードしますか？", "セットアップ", MessageBoxButton.YesNo);
+                var result = MessageBox.Show($"音声モデル ({defaultVoice.Name}) が見つかりません。\nダウンロードしますか？ (約63MB)", "セットアップ", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (result == MessageBoxResult.Yes)
                 {
                     LoadingOverlay.Visibility = Visibility.Visible;

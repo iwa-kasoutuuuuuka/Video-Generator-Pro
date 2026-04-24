@@ -1,13 +1,13 @@
-# .gitignore for Shorts Video Generator PRO
-# ----------------------------------------
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log
 
-# .NET / Visual Studio
+# .NET Build Artifacts
 bin/
 obj/
 *.user
 *.suo
-*.userosscache
-*.sln.docstates
 
 # AI Models (Heavy Files)
 Models/
@@ -28,7 +28,9 @@ BGM/
 VideoOutput/
 publish_temp/
 ShortsVideoGeneratorPro_v1.0_Portable/
+scratch_test/
 
 # System Files
 .DS_Store
 Thumbs.db
+*.sln

@@ -11,22 +11,18 @@ namespace ShortsGeneratorApp
     {
         public string ModelsDir { get; } = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models");
 
+        // --- 確実に存在が確認されたURL ---
         public string FFMpegUrl { get; } = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
         public string PiperUrl { get; } = "https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_windows_amd64.zip";
 
         public List<AIModelInfo> LlmModels { get; } = new List<AIModelInfo>
         {
+            // ✅ 実在確認済み: Phi-3-mini-4k-instruct-q4.gguf (2.39 GB)
             new AIModelInfo { 
                 Name = "Phi-3 Mini (高性能・軽量)", 
                 Path = "Phi-3-mini-4k-instruct-q4.gguf", 
                 DownloadUrl = "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf", 
                 RequiredVram = "4GB" 
-            },
-            new AIModelInfo { 
-                Name = "Llama-3 8B (高精度)", 
-                Path = "Meta-Llama-3-8B-Instruct.Q4_K_M.gguf", 
-                DownloadUrl = "https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf", 
-                RequiredVram = "8GB" 
             }
         };
 
@@ -42,11 +38,13 @@ namespace ShortsGeneratorApp
 
         public List<AIModelInfo> VoiceModels { get; } = new List<AIModelInfo>
         {
+            // ✅ 実在確認済み: en_US-lessac-medium (63.2 MB)
+            // 日本語モデルはPiper公式に存在しないため、英語をデフォルトとする
             new AIModelInfo { 
-                Name = "日本語 - 男性 (標準)", 
-                Path = "ja_JP-natsuya-medium.onnx", 
-                DownloadUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ja/ja_JP/natsuya/medium/ja_JP-natsuya-medium.onnx", 
-                ConfigUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ja/ja_JP/natsuya/medium/ja_JP-natsuya-medium.onnx.json",
+                Name = "English - Lessac (高品質)", 
+                Path = "en_US-lessac-medium.onnx", 
+                DownloadUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx", 
+                ConfigUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
                 RequiredVram = "0GB" 
             }
         };
@@ -68,7 +66,18 @@ namespace ShortsGeneratorApp
             {
                 if (File.Exists(zipPath))
                 {
-                    System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, AppDomain.CurrentDomain.BaseDirectory, true);
+                    // piper_windows_amd64.zip は piper/ サブフォルダに展開される
+                    string extractTarget = AppDomain.CurrentDomain.BaseDirectory;
+                    System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, extractTarget, true);
+                    
+                    // piper/piper.exe を BaseDirectory にコピー
+                    string piperInSubDir = Path.Combine(extractTarget, "piper", "piper.exe");
+                    string piperDest = Path.Combine(extractTarget, "piper.exe");
+                    if (File.Exists(piperInSubDir) && !File.Exists(piperDest))
+                    {
+                        File.Copy(piperInSubDir, piperDest);
+                    }
+                    
                     File.Delete(zipPath);
                 }
             });
@@ -77,36 +86,47 @@ namespace ShortsGeneratorApp
         public async Task DownloadFileAsync(string url, string destinationPath, Action<double> onProgress)
         {
             string tempPath = destinationPath + ".tmp";
-            using (var client = new HttpClient())
+            try
             {
-                using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                using (var client = new HttpClient())
                 {
-                    response.EnsureSuccessStatusCode();
-                    var totalBytes = response.Content.Headers.ContentLength ?? -1L;
-                    var canReportProgress = totalBytes != -1L;
-
-                    using (var contentStream = await response.Content.ReadAsStreamAsync())
-                    using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                    client.Timeout = TimeSpan.FromMinutes(30); // 大容量ファイル対応
+                    using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
                     {
-                        var buffer = new byte[8192];
-                        var totalReadBytes = 0L;
-                        var readBytes = 0;
+                        response.EnsureSuccessStatusCode();
+                        var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                        var canReportProgress = totalBytes != -1L;
 
-                        while ((readBytes = await contentStream.ReadAsync(buffer, 0, buffer.Length)) != 0)
+                        using (var contentStream = await response.Content.ReadAsStreamAsync())
+                        using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                         {
-                            await fileStream.WriteAsync(buffer, 0, readBytes);
-                            totalReadBytes += readBytes;
+                            var buffer = new byte[8192];
+                            var totalReadBytes = 0L;
+                            var readBytes = 0;
 
-                            if (canReportProgress)
+                            while ((readBytes = await contentStream.ReadAsync(buffer, 0, buffer.Length)) != 0)
                             {
-                                onProgress?.Invoke((double)totalReadBytes / totalBytes * 100);
+                                await fileStream.WriteAsync(buffer, 0, readBytes);
+                                totalReadBytes += readBytes;
+
+                                if (canReportProgress)
+                                {
+                                    onProgress?.Invoke((double)totalReadBytes / totalBytes * 100);
+                                }
                             }
                         }
                     }
                 }
+                // ダウンロード完了時のみリネーム（アトミック）
+                if (File.Exists(destinationPath)) File.Delete(destinationPath);
+                File.Move(tempPath, destinationPath);
             }
-            if (File.Exists(destinationPath)) File.Delete(destinationPath);
-            File.Move(tempPath, destinationPath);
+            catch
+            {
+                // 失敗時は一時ファイルを削除
+                if (File.Exists(tempPath)) File.Delete(tempPath);
+                throw;
+            }
         }
 
         public async Task DownloadAndExtractFFmpegAsync(string url, Action<double> onProgress)
