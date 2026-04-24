@@ -28,35 +28,36 @@ namespace ShortsGeneratorApp
 [RULES]
 - 導入は最初の5秒で視聴者を引き込む「強力なフック」を設計すること。
 - 内容は中学生でも理解できる平易かつ、感情を動かすテンポの良い表現にする。
-- JSON形式のみを出力すること。解説やMarkdown装飾（###等）は一切含めないこと。
-- 出力は必ず {{ で始まり }} で終わる純粋なJSONデータのみとせよ。
+- 出力は必ず以下のJSON構造に従い、純粋なJSONのみを返せ。
+- 言語は日本語を使用すること。ただし `visual_prompt` は画像生成AI（Stable Diffusion）向けに詳細な英語で記述せよ。
+- **解説、前置き、Markdownの枠、### などの記号は一切禁止する。**
 
-[JSON STRUCTURE]
+[SUCCESS EXAMPLE]
 {{
-  ""titles"": [""高CTRタイトル1"", ""高CTRタイトル2"", ""高CTRタイトル3""],
-  ""thumbnail_texts"": [""強い文言1"", ""強い文言2""],
-  ""tags"": [""タグ1"", ""タグ2"", ""タグ3""],
-  ""description"": ""SEO最適化された説明文"",
-  ""hook"": ""冒頭5秒の強烈な一言"",
-  ""script_full"": ""自然な話し言葉の全文（{duration}秒分）"",
+  ""titles"": [""驚愕の真実！"", ""誰も知らない裏技"", ""3分でわかる解説""],
+  ""thumbnail_texts"": [""ヤバイ"", ""禁断の手法""],
+  ""tags"": [""解説"", ""豆知識""],
+  ""description"": ""今回の動画では..."",
+  ""hook"": ""ねぇ、これ知ってた？"",
+  ""script_full"": ""こんにちは！今日は..."",
   ""scenes"": [
     {{
       ""id"": 1,
-      ""narration"": ""シーンのナレーション"",
-      ""visual_prompt"": ""English prompt for high quality AI image"",
+      ""narration"": ""こんにちは！今日は驚きの事実をお伝えします。"",
+      ""visual_prompt"": ""A surprised young woman pointing at a glowing mysterious smartphone, cinematic lighting, 8k, detailed"",
       ""duration_seconds"": 5
     }}
   ],
-  ""srt"": ""1\n00:00:00,000 --> 00:00:05,000\n字幕テキスト..."",
-  ""risk_check"": ""炎上リスクや誇張の有無""
+  ""srt"": ""1\n00:00:00,000 --> 00:00:05,000\nこんにちは！今日は驚きの事実をお伝えします。"",
+  ""risk_check"": ""なし""
 }}
 
 [STRICT RULE]
-あなたはJSON生成エンジンです。解説、挨拶、### などのMarkdown記号は「死罪」に値します。
-純粋なJSONオブジェクトのみを返してください。
+あなたはJSON生成機械です。`{{` で始まり `}}` で終わるデータ以外を1文字でも出力したらエラーとなります。
 
-[INPUT]
+[INPUT DATA START]
 {inputUrlOrText}
+[INPUT DATA END]
 ";
 
             V2GenerationResult? finalResult = null;
