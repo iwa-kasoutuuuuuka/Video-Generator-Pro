@@ -9,26 +9,12 @@ namespace ShortsGeneratorApp
     {
         public const string PromptTemplate = @"
 [TASK]
-入力文をもとに、{{PLATFORM}}向けの動画台本（JSON形式）を1つ作成してください。
-視聴者の目を引き、最後まで飽きさせない構成にしてください。
-
-[ルール]
-1. ナレーション (narration): 
-   - 視聴者に語りかけるような、自然で親しみやすい話し言葉にしてください。
-   - 難しい漢字は避け、聞き取りやすい文章にしてください。
-   - **全シーンの合計ナレーション文字数を {{MIN_CHARS}}文字 〜 {{MAX_CHARS}}文字 の範囲内に必ず収めてください。**
-2. テロップ (telop_text):
-   - 15文字以内の短くインパクトのある言葉にしてください。
-   - **ナレーションの丸写しは厳禁です。** 内容を要約するか、補足するキャッチコピーにしてください。
-3. 画像指示 (visual_prompt):
-   - Stable Diffusionで使用可能な「具体的で高品質な英語のプロンプト」を作成してください。
-   - 例: ""Cinematic shot of a futuristic city at sunset, 8k, highly detailed""
-4. 構成:
-   - 目標時間（{{DURATION}}秒）に合わせて、適切な数のシーンを作成してください（1シーン3〜5秒目安）。
+あなたは、日本のバイラルコンテンツに特化した、オフライン最適化・高維持率のYouTube Shorts & TikTok自動制作エンジンです。
 
 [CONFIG]
 - Platform: {{PLATFORM}}
 - Orientation: {{ORIENTATION}}
+- Style: {{STYLE}}
 - Target Duration: {{DURATION}} seconds
 - Target Total Characters: {{TARGET_CHARS}} (Range: {{MIN_CHARS}} - {{MAX_CHARS}})
 
@@ -43,7 +29,7 @@ namespace ShortsGeneratorApp
       ""scenes"": [
         {
           ""id"": 1,
-          ""narration"": ""(視聴者の興味を引く導入ナレーション)"",
+          ""narration"": ""(スタイルに合わせた導入ナレーション)"",
           ""telop_text"": ""(短く強いテロップ)"",
           ""visual_prompt"": ""(Detailed English prompt for image generation)""
         }
@@ -63,15 +49,20 @@ namespace ShortsGeneratorApp
             _localAI = localAI;
         }
 
-
-        public async Task<GenerationResult> GenerateAsync(string platform, string blogText, int duration, string orientation, int targetChars)
+        public async Task<GenerationResult> GenerateAsync(string platform, string blogText, int duration, string orientation, int targetChars, string style = "標準 (Standard)")
         {
             int minChars = (int)(targetChars * 0.9);
             int maxChars = (int)(targetChars * 1.1);
 
+            string styleInstruction = "";
+            if (style.Contains("煽り")) styleInstruction = "視聴者の注意を強く引く、ショッキングでエネルギッシュな口調";
+            else if (style.Contains("教育")) styleInstruction = "丁寧で分かりやすく、信頼感のある落ち着いた口調";
+            else styleInstruction = "聞き取りやすく、自然で親しみやすい標準的な口調";
+
             string prompt = PromptTemplate
                 .Replace("{{PLATFORM}}", platform)
                 .Replace("{{ORIENTATION}}", orientation)
+                .Replace("{{STYLE}}", styleInstruction)
                 .Replace("{{DURATION}}", duration.ToString())
                 .Replace("{{TARGET_CHARS}}", targetChars.ToString())
                 .Replace("{{MIN_CHARS}}", minChars.ToString())
@@ -105,7 +96,7 @@ namespace ShortsGeneratorApp
                                 s.TelopText = s.Narration;
                         }
                         
-                        // Limit to 20 chars for safety if still too long
+                        // Limit to 25 chars for safety if still too long
                         if (s.TelopText.Length > 25)
                             s.TelopText = s.TelopText.Substring(0, 22) + "...";
                     }
@@ -129,30 +120,14 @@ namespace ShortsGeneratorApp
                 int endJson = input.IndexOf("```", startJson);
                 if (endJson != -1) cleaned = input.Substring(startJson, endJson - startJson);
             }
-            else if (input.Contains("```")) {
-                int startJson = input.IndexOf("```") + 3;
-                int endJson = input.IndexOf("```", startJson);
-                if (endJson != -1) cleaned = input.Substring(startJson, endJson - startJson);
-            }
-
+            
             int start = cleaned.IndexOf("{");
-            if (start == -1) return cleaned.Trim();
-
-            // Find matching closing brace to avoid "Additional text" error
-            int braceCount = 0;
-            for (int i = start; i < cleaned.Length; i++)
-            {
-                if (cleaned[i] == '{') braceCount++;
-                else if (cleaned[i] == '}') braceCount--;
-
-                if (braceCount == 0)
-                {
-                    string json = cleaned.Substring(start, i - start + 1);
-                    return RepairJson(json);
-                }
+            int end = cleaned.LastIndexOf("}");
+            if (start != -1 && end != -1 && end > start) {
+                return RepairJson(cleaned.Substring(start, end - start + 1).Trim());
             }
 
-            return RepairJson(cleaned.Substring(start).Trim());
+            return RepairJson(cleaned.Trim());
         }
 
         private string RepairJson(string json)
@@ -162,9 +137,6 @@ namespace ShortsGeneratorApp
             // Remove trailing commas before closing braces/brackets (common AI error)
             string repaired = System.Text.RegularExpressions.Regex.Replace(json, @",\s*([\]}])", "$1");
             
-            // Fix unquoted keys if they are simple words (common in some models)
-            // repaired = System.Text.RegularExpressions.Regex.Replace(repaired, @"([{,]\s*)([a-zA-Z0-9_]+)\s*:", "$1\"$2\":");
-
             return repaired; 
         }
 
@@ -178,8 +150,8 @@ namespace ShortsGeneratorApp
 JSONの構造は変えず、内容だけを更新してください。
 
 [RULES]
-- ナレーションは聞き取りやすく、魅力的な話し言葉にする。
-- テロップは短く（15字以内）、ナレーションの要約や補足にする。
+- ナレーションは聞き取りやすく、印象的な話し言葉にする。
+- テロップは短く！（15字以内）、ナレーションの要素や補足を強調する。
 - 画像プロンプト（visual_prompt）は現在のものを維持するか、より詳細に改善する。
 
 [CURRENT JSON]
@@ -191,12 +163,13 @@ JSONの構造は変えず、内容だけを更新してください。
 
             try {
                 return JsonConvert.DeserializeObject<Variation>(cleanedJson) ?? v;
-            }
-            catch {
-                return v; // Fallback to original
+            } catch {
+                return v;
             }
         }
     }
+
+    // --- Data Models ---
 
     public class GenerationResult
     {
@@ -210,7 +183,7 @@ JSONの構造は変えず、内容だけを更新してください。
         public double TargetDuration { get; set; }
 
         [JsonProperty("variations")]
-        public List<Variation> Variations { get; set; }
+        public List<Variation> Variations { get; set; } = new List<Variation>();
     }
 
     public class Variation
@@ -221,38 +194,11 @@ JSONの構造は変えず、内容だけを更新してください。
         [JsonProperty("hook_type")]
         public string HookType { get; set; }
 
-        [JsonProperty("loop_or_cta_logic")]
-        public string LoopOrCtaLogic { get; set; }
-
         [JsonProperty("total_duration")]
         public double TotalDuration { get; set; }
 
-        [JsonProperty("bgm")]
-        public BgmInfo Bgm { get; set; }
-
         [JsonProperty("scenes")]
-        public List<Scene> Scenes { get; set; }
-    }
-
-    public class BgmInfo
-    {
-        [JsonProperty("auto_generation_prompt")]
-        public string AutoGenerationPrompt { get; set; }
-
-        [JsonProperty("vibe")]
-        public string Vibe { get; set; }
-
-        [JsonProperty("target_length_seconds")]
-        public double TargetLengthSeconds { get; set; }
-
-        [JsonProperty("recommended_tool")]
-        public string RecommendedTool { get; set; }
-
-        [JsonProperty("mp3_filename_suggestion")]
-        public string Mp3FilenameSuggestion { get; set; }
-
-        [JsonProperty("metadata_txt_content")]
-        public string MetadataTxtContent { get; set; }
+        public List<Scene> Scenes { get; set; } = new List<Scene>();
     }
 
     public class Scene
@@ -263,34 +209,22 @@ JSONの構造は変えず、内容だけを更新してください。
         [JsonProperty("narration")]
         public string Narration { get; set; }
 
-        [JsonProperty("telop")]
-        public Telop? Telop { get; set; }
-
         [JsonProperty("telop_text")]
-        public string? TelopText { get; set; }
+        public string TelopText { get; set; }
 
         [JsonProperty("visual_prompt")]
-        public string? VisualPrompt { get; set; }
-
-        public string GetTelopText() => TelopText ?? Telop?.Text ?? "";
-
-        [JsonProperty("visual")]
-        public string Visual { get; set; }
-
-        [JsonProperty("transition")]
-        public string Transition { get; set; }
-
-        [JsonProperty("voice")]
-        public Voice Voice { get; set; }
-
-        [JsonProperty("pause_after")]
-        public double PauseAfter { get; set; }
+        public string VisualPrompt { get; set; }
 
         [JsonProperty("duration")]
         public double Duration { get; set; }
 
+        [JsonProperty("telop")]
+        public Telop Telop { get; set; }
+
         [JsonProperty("music_sync")]
         public string MusicSync { get; set; }
+
+        public string GetTelopText() => TelopText ?? Telop?.Text ?? "";
     }
 
     public class Telop

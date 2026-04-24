@@ -13,8 +13,17 @@ namespace ShortsGeneratorApp
     public class VideoRenderer
     {
         private SDManager? _sdManager;
+        private Action<string>? _logger;
+
+        // Shared semaphores to protect system resources globally
+        private static readonly System.Threading.SemaphoreSlim _sdSemaphore = new System.Threading.SemaphoreSlim(1); // VRAM Protection
+        private static readonly System.Threading.SemaphoreSlim _renderSemaphore = new System.Threading.SemaphoreSlim(4); // FFmpeg CPU/IO balance
+        private static readonly System.Threading.SemaphoreSlim _speechSemaphore = new System.Threading.SemaphoreSlim(1); // Speech Engine Protection
 
         public void SetSDManager(SDManager sdManager) => _sdManager = sdManager;
+        public void SetLogger(Action<string> logger) => _logger = logger;
+
+        private void Log(string msg) => _logger?.Invoke($"[Renderer] {msg}");
 
         public async Task RenderVideoAsync(GenerationResult result, Variation variation, string outputPath)
         {
@@ -26,63 +35,55 @@ namespace ShortsGeneratorApp
             string tempDir = Path.Combine(Path.GetTempPath(), "ShortsGen_" + Guid.NewGuid().ToString());
             Directory.CreateDirectory(tempDir);
 
+            Log($"Starting render for variation: {variation.VariationId} ({variation.Scenes.Count} scenes)");
+
             try
             {
-                var sceneTasks = new List<Task>();
-                string[] audioFiles = new string[variation.Scenes.Count];
-                string[] imageFiles = new string[variation.Scenes.Count];
-                
-                // Semaphore to prevent OOM in VRAM for SD generation (max 1 at a time)
-                var sdSemaphore = new System.Threading.SemaphoreSlim(1);
+                var clipTasks = new List<Task<string>>();
 
                 for (int i = 0; i < variation.Scenes.Count; i++)
                 {
                     int index = i;
                     var scene = variation.Scenes[i];
                     
-                    sceneTasks.Add(Task.Run(async () => {
-                        // 1. Generate Speech (Parallel)
-                        string audioPath = Path.Combine(tempDir, $"scene_{index}.wav");
-                        SynthesizeSpeech(scene.Narration, audioPath);
-                        audioFiles[index] = audioPath;
-
-                        // 2. Render Frame (SD is serialized via semaphore, but other parts are parallel)
-                        string imagePath = Path.Combine(tempDir, $"scene_{index}.png");
-                        if (_sdManager != null && !string.IsNullOrEmpty(scene.VisualPrompt))
-                        {
-                            await sdSemaphore.WaitAsync();
-                            try {
-                                byte[] imgData = await _sdManager.GenerateImageAsync(scene.VisualPrompt, width: w, height: h);
-                                File.WriteAllBytes(imagePath, imgData);
-                            } catch {
-                                RenderFrame(scene, imagePath, w, h);
-                            } finally {
-                                sdSemaphore.Release();
-                            }
-                        }
-                        else {
-                            RenderFrame(scene, imagePath, w, h);
-                        }
-                        imageFiles[index] = imagePath;
-                    }));
-                }
-
-                await Task.WhenAll(sceneTasks);
-
-                // 3. Render Clips in Parallel
-                var clipTasks = new List<Task<string>>();
-                var renderSemaphore = new System.Threading.SemaphoreSlim(4); // Max 4 parallel FFmpeg jobs
-
-                for (int i = 0; i < audioFiles.Length; i++)
-                {
-                    int index = i;
                     clipTasks.Add(Task.Run(async () => {
-                        await renderSemaphore.WaitAsync();
+                        string audioPath = Path.Combine(tempDir, $"scene_{index}.wav");
+                        string imagePath = Path.Combine(tempDir, $"scene_{index}.png");
+                        string clipPath = Path.Combine(tempDir, $"clip_{index}.mp4");
+
+                        // 1. Parallel asset generation
+                        var audioTask = Task.Run(async () => {
+                            await SynthesizeSpeechAsync(scene.Narration, audioPath);
+                        });
+
+                        var imageTask = Task.Run(async () => {
+                            if (_sdManager != null && !string.IsNullOrEmpty(scene.VisualPrompt))
+                            {
+                                await _sdSemaphore.WaitAsync();
+                                try {
+                                    byte[] imgData = await _sdManager.GenerateImageAsync(scene.VisualPrompt, width: w, height: h);
+                                    await File.WriteAllBytesAsync(imagePath, imgData);
+                                } catch (Exception ex) {
+                                    Log($"SD Generation failed for scene {index}: {ex.Message}. Falling back to placeholder.");
+                                    RenderFrame(scene, imagePath, w, h);
+                                } finally {
+                                    _sdSemaphore.Release();
+                                }
+                            }
+                            else {
+                                RenderFrame(scene, imagePath, w, h);
+                            }
+                        });
+
+                        await Task.WhenAll(audioTask, imageTask);
+
+                        // 2. Render Clip
+                        await _renderSemaphore.WaitAsync();
                         try {
-                            string clipPath = Path.Combine(tempDir, $"clip_{index}.mp4");
+                            Log($"Rendering clip {index}/{variation.Scenes.Count}...");
                             await FFMpegArguments
-                                .FromFileInput(imageFiles[index], true, options => options.WithCustomArgument("-loop 1"))
-                                .AddFileInput(audioFiles[index])
+                                .FromFileInput(imagePath, true, options => options.WithCustomArgument("-loop 1"))
+                                .AddFileInput(audioPath)
                                 .OutputToFile(clipPath, true, options => options
                                     .WithVideoCodec("libx264")
                                     .WithAudioCodec("aac")
@@ -90,15 +91,20 @@ namespace ShortsGeneratorApp
                                 .ProcessAsynchronously();
                             return clipPath;
                         } finally {
-                            renderSemaphore.Release();
+                            _renderSemaphore.Release();
                         }
                     }));
                 }
 
                 var clips = await Task.WhenAll(clipTasks);
 
-                // 4. Concatenate all clips
+                Log("Concatenating all clips...");
                 await Task.Run(() => FFMpeg.Join(outputPath, clips));
+                Log($"Video rendered successfully: {outputPath}");
+            }
+            catch (Exception ex) {
+                Log($"CRITICAL ERROR during render: {ex.Message}");
+                throw;
             }
             finally
             {
@@ -106,20 +112,19 @@ namespace ShortsGeneratorApp
             }
         }
 
-        private static readonly System.Threading.SemaphoreSlim _speechSemaphore = new System.Threading.SemaphoreSlim(1);
-
-        private void SynthesizeSpeech(string text, string outputPath)
+        private async Task SynthesizeSpeechAsync(string text, string outputPath)
         {
-            // Fix: 'textToSpeak' cannot be null or empty for SpeechSynthesizer
             string textToSpeak = string.IsNullOrWhiteSpace(text) ? " " : text;
 
-            _speechSemaphore.Wait();
+            await _speechSemaphore.WaitAsync();
             try {
-                using (var synth = new SpeechSynthesizer())
-                {
-                    synth.SetOutputToWaveFile(outputPath);
-                    synth.Speak(textToSpeak);
-                }
+                await Task.Run(() => {
+                    using (var synth = new SpeechSynthesizer())
+                    {
+                        synth.SetOutputToWaveFile(outputPath);
+                        synth.Speak(textToSpeak);
+                    }
+                });
             } finally {
                 _speechSemaphore.Release();
             }
@@ -137,7 +142,7 @@ namespace ShortsGeneratorApp
                 var brush = new LinearGradientBrush(new Rectangle(0,0,width,height), Color.FromArgb(139, 92, 246), Color.FromArgb(236, 72, 153), 45f);
                 g.FillEllipse(brush, width * 0.1f, height * 0.2f, width * 0.8f, width * 0.8f);
 
-                // Visual Prompt (Suggestion for the scene)
+                // Visual Prompt
                 if (!string.IsNullOrEmpty(scene.VisualPrompt))
                 {
                     var visualFont = new Font("Arial", 24, FontStyle.Italic);
@@ -153,9 +158,7 @@ namespace ShortsGeneratorApp
                     float x = (width - textSize.Width) / 2;
                     float y = height * 0.85f;
                     
-                    // Shadow
                     g.DrawString(telopText, font, Brushes.Black, x + 3, y + 3);
-                    // Main Text
                     g.DrawString(telopText, font, Brushes.White, x, y);
                 }
 

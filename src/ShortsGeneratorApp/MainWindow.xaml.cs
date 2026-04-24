@@ -43,7 +43,8 @@ namespace ShortsGeneratorApp
                     GlobalFFOptions.Configure(options => options.BinaryFolder = AppDomain.CurrentDomain.BaseDirectory);
                 }
 
-                this.Title = "Shorts Video Generator PRO v1.8.1 [OFFLINE]";
+                _renderer.SetLogger(Log);
+                this.Title = "Shorts Video Generator PRO v1.8.2 [OFFLINE]";
                 
                 // Startup check for dependencies
                 Dispatcher.BeginInvoke(new Action(async () => {
@@ -256,10 +257,11 @@ namespace ShortsGeneratorApp
                 
                 string platform = YoutubeRadio.IsChecked == true ? "YouTube" : "TikTok";
                 string orientation = (OrientationCombo.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "Vertical (9:16)";
+                string style = (StyleCombo.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "標準 (Standard)";
                 int duration = (int)DurationSlider.Value;
                 int targetChars = (int)TargetCharsSlider.Value;
 
-                var result = await _realEngine.GenerateAsync(platform, blogText, duration, orientation, targetChars);
+                var result = await _realEngine.GenerateAsync(platform, blogText, duration, orientation, targetChars, style);
                 
                 Log("Generation successful. Displaying results.");
                 DisplayResults(result);

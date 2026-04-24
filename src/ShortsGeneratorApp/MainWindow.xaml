@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ShortsGeneratorApp"
         mc:Ignorable="d"
-        Title="Shorts Video Generator PRO v1.8.1 [OFFLINE]" Height="950" Width="1300"
+        Title="Shorts Video Generator PRO v1.8.2 [OFFLINE]" Height="950" Width="1300"
         Background="#05070A" Foreground="#F8FAFC"
         WindowStartupLocation="CenterScreen"
         Icon="app_icon.png">
@@ -228,11 +228,31 @@
                              AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
 
                     <StackPanel Grid.Row="2" Margin="0,15">
-                        <TextBlock Text="Platform" Foreground="#94A3B8" Margin="0,0,0,5" />
-                        <StackPanel Orientation="Horizontal">
-                            <RadioButton x:Name="YoutubeRadio" Content="Shorts" IsChecked="True" Foreground="White" Margin="0,0,15,0" />
-                            <RadioButton x:Name="TiktokRadio" Content="TikTok" Foreground="White" />
-                        </StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Platform" Foreground="#94A3B8" Margin="0,0,0,5" />
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="YoutubeRadio" Content="Shorts" IsChecked="True" Foreground="White" Margin="0,0,15,0" />
+                                    <RadioButton x:Name="TiktokRadio" Content="TikTok" Foreground="White" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="演出スタイル (Style)" Foreground="#94A3B8" Margin="0,0,0,5" />
+                                <ComboBox x:Name="StyleCombo" Background="#0F172A" Foreground="White">
+                                    <ComboBoxItem Content="標準 (Standard)" IsSelected="True" />
+                                    <ComboBoxItem Content="情熱的 (Passionate)" />
+                                    <ComboBoxItem Content="論理的 (Logical/Educational)" />
+                                    <ComboBoxItem Content="コメディ (Comedy)" />
+                                    <ComboBoxItem Content="ニュース風 (News/Formal)" />
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
 
                     <Button Grid.Row="3" x:Name="GenerateButton" Content="生成を開始する" Style="{StaticResource ModernButton}" 
