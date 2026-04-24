@@ -40,6 +40,7 @@ namespace ShortsGeneratorApp
         public MainWindow()
         {
             try {
+                CleanupTempFolders();
                 InitializeComponent();
                 LoadSettings();
                 InitializeSettings();
@@ -522,6 +523,15 @@ namespace ShortsGeneratorApp
             {
                 LoadingOverlay.Visibility = Visibility.Collapsed;
             }
+        private void CleanupTempFolders()
+        {
+            try {
+                string tempRoot = Path.GetTempPath();
+                foreach (var dir in Directory.GetDirectories(tempRoot, "ShortsGenV2_*"))
+                {
+                    try { Directory.Delete(dir, true); } catch { }
+                }
+            } catch { }
         }
     }
 
