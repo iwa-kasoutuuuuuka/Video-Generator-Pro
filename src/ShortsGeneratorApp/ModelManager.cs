@@ -13,7 +13,7 @@ namespace ShortsGeneratorApp
 
         // --- 確実に存在が確認されたURL ---
         public string FFMpegUrl { get; } = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
-        public string PiperUrl { get; } = "https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_windows_amd64.zip";
+        public string PiperUrl { get; } = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip";
 
         public List<AIModelInfo> LlmModels { get; } = new List<AIModelInfo>
         {
