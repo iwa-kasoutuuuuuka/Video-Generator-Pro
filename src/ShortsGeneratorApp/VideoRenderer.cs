@@ -329,15 +329,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         private async Task CreateSilentWavAsync(string outputPath, double durationSeconds)
         {
             try {
-                // Use FFmpeg to create a silent wav quickly
-                await FFMpegArguments
-                    .FromFileInput("lavfi", true, options => options.WithCustomArgument($"-i anullsrc=r=22050:cl=mono -t {durationSeconds}"))
-                    .OutputToFile(outputPath, true, options => options.WithAudioCodec("pcm_s16le"))
-                    .ProcessAsynchronously();
+                // Use a direct process call for maximum reliability in creating the silent fallback
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg.exe",
+                    Arguments = $"-f lavfi -i anullsrc=r=22050:cl=mono -t {durationSeconds} -y \"{outputPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var process = Process.Start(startInfo))
+                {
+                    if (process != null) await process.WaitForExitAsync();
+                }
             } catch (Exception ex) {
-                Log($"Failed to create silent wav: {ex.Message}");
-                // Fallback: Just create an empty file if FFmpeg fails (better than nothing)
-                if (!File.Exists(outputPath)) File.WriteAllBytes(outputPath, new byte[0]);
+                Log($"Critical failure in silent wav fallback: {ex.Message}");
             }
         }
     }
