@@ -197,7 +197,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         private async Task SynthesizeSpeechPiperAsync(string text, string outputPath)
         {
-            if (string.IsNullOrWhiteSpace(text)) return;
+            if (string.IsNullOrWhiteSpace(text)) {
+                await CreateSilentWavAsync(outputPath, 1.0); // Create 1s silent wav
+                return;
+            }
             
             await _speechSemaphore.WaitAsync();
             try {
@@ -240,6 +243,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         }
                     }
                 });
+
+                // Final check to ensure file exists
+                if (!File.Exists(outputPath)) {
+                    Log("Piper failed to create file. Creating silent fallback.");
+                    await CreateSilentWavAsync(outputPath, 1.0);
+                }
+            } catch (Exception ex) {
+                Log($"Synthesize Error: {ex.Message}");
+                await CreateSilentWavAsync(outputPath, 1.0);
             } finally {
                 _speechSemaphore.Release();
             }
@@ -312,6 +324,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 g.Clear(Color.FromArgb(17, 25, 40));
                 g.DrawString(text, new Font("Arial", 24), Brushes.Gray, new RectangleF(40, 40, w - 80, h - 80));
                 bitmap.Save(outputPath, ImageFormat.Png);
+            }
+        }
+        private async Task CreateSilentWavAsync(string outputPath, double durationSeconds)
+        {
+            try {
+                // Use FFmpeg to create a silent wav quickly
+                await FFMpegArguments
+                    .FromFileInput("lavfi", true, options => options.WithCustomArgument($"-i anullsrc=r=22050:cl=mono -t {durationSeconds}"))
+                    .OutputToFile(outputPath, true, options => options.WithAudioCodec("pcm_s16le"))
+                    .ProcessAsynchronously();
+            } catch (Exception ex) {
+                Log($"Failed to create silent wav: {ex.Message}");
+                // Fallback: Just create an empty file if FFmpeg fails (better than nothing)
+                if (!File.Exists(outputPath)) File.WriteAllBytes(outputPath, new byte[0]);
             }
         }
     }

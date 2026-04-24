@@ -476,7 +476,7 @@ namespace ShortsGeneratorApp
         private async Task ExportVideoV2(V2GenerationResult result)
         {
             LoadingOverlay.Visibility = Visibility.Visible;
-            LoadingText.Text = "v2.0 レンダリング中 (zoompan + loudnorm)...";
+            LoadingText.Text = "v2.6 Premium レンダリング中 (zoompan + loudnorm)...";
             
             try
             {
