@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" width="128" height="128" alt="Shorts Video Generator PRO Icon">
+</p>
+
 # Shorts Video Generator PRO v1.8.2
 
 ## 🌟 主な機能 (v1.8.2)
