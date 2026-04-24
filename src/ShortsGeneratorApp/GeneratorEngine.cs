@@ -28,7 +28,8 @@ namespace ShortsGeneratorApp
 [RULES]
 - 導入は最初の5秒で視聴者を引き込む「強力なフック」を設計すること。
 - 内容は中学生でも理解できる平易かつ、感情を動かすテンポの良い表現にする。
-- JSON形式のみを出力すること。
+- JSON形式のみを出力すること。解説やMarkdown装飾（###等）は一切含めないこと。
+- 出力は必ず {{ で始まり }} で終わる純粋なJSONデータのみとせよ。
 
 [JSON STRUCTURE]
 {{
@@ -50,6 +51,10 @@ namespace ShortsGeneratorApp
   ""risk_check"": ""炎上リスクや誇張の有無""
 }}
 
+[STRICT RULE]
+あなたはJSON生成エンジンです。解説、挨拶、### などのMarkdown記号は「死罪」に値します。
+純粋なJSONオブジェクトのみを返してください。
+
 [INPUT]
 {inputUrlOrText}
 ";
@@ -62,6 +67,13 @@ namespace ShortsGeneratorApp
                 string response = await _localAI.GenerateResponseAsync(prompt);
                 string cleanedJson = ExtractJson(response);
 
+                if (string.IsNullOrEmpty(cleanedJson) || !cleanedJson.StartsWith("{"))
+                {
+                    if (i == 2) throw new Exception($"AIが有効なJSONを生成できませんでした。内容: {response}");
+                    prompt += "\n\n[ERROR] 前回の出力にはJSONが含まれていませんでした。解説を省き、{ } で囲まれたJSONデータのみを出力してください。";
+                    continue;
+                }
+
                 try {
                     finalResult = JsonConvert.DeserializeObject<V2GenerationResult>(cleanedJson);
                     if (finalResult != null && finalResult.Scenes != null && finalResult.Scenes.Count > 0)
@@ -70,7 +82,7 @@ namespace ShortsGeneratorApp
                     }
                 } catch (Exception ex) {
                     if (i == 2) throw new Exception($"AI出力の解析に失敗しました(3回試行): {ex.Message}\n内容: {cleanedJson}");
-                    prompt += "\n\n[WARNING] 前回の出力はJSONとして不正でした。必ず正しいJSONのみを出力してください。";
+                    prompt += $"\n\n[WARNING] 前回の出力はJSONとして不正でした({ex.Message})。構文エラーを修正し、正しいJSONのみを出力してください。";
                 }
             }
 
@@ -81,7 +93,11 @@ namespace ShortsGeneratorApp
         {
             if (string.IsNullOrWhiteSpace(input)) return "";
 
-            // Find the first '{' and the last '}' to extract the core JSON block
+            // 1. Try to find JSON inside markdown code blocks ```json ... ``` or ``` ... ```
+            var match = Regex.Match(input, @"```(?:json)?\s*(\{.*?\})\s*```", RegexOptions.Singleline);
+            if (match.Success) return match.Groups[1].Value.Trim();
+
+            // 2. Find the first '{' and the last '}' to extract the core JSON block
             int start = input.IndexOf("{");
             int end = input.LastIndexOf("}");
 
@@ -90,7 +106,7 @@ namespace ShortsGeneratorApp
                 return input.Substring(start, end - start + 1).Trim();
             }
             
-            return input.Trim();
+            return ""; // JSON not found
         }
     }
 
