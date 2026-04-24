@@ -97,11 +97,11 @@ namespace ShortsGeneratorApp
                 // Final Assembly with Sidechain Auto-Ducking and Faststart
                 var ffmpeg = FFMpegArguments.FromFileInput(listPath, false, options => options.WithCustomArgument("-f concat -safe 0"));
                 
-                string audioFilter = "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[aout]";
+                string audioFilter = "[0:a]aresample=44100,dynaudnorm=p=0.9:m=100[aout]";
                 if (File.Exists(bgmPath))
                 {
                     ffmpeg.AddFileInput(bgmPath, true, options => options.WithCustomArgument("-stream_loop -1"));
-                    audioFilter = "[1:a]volume=0.2[bg];[0:a][bg]amix=inputs=2:duration=first[mixed];[mixed]loudnorm=I=-16:TP=-1.5:LRA=11[aout]";
+                    audioFilter = "[1:a]volume=0.2[bg];[0:a][bg]amix=inputs=2:duration=first[mixed];[mixed]aresample=44100,dynaudnorm=p=0.9:m=100[aout]";
                 }
 
                 await ffmpeg.OutputToFile(outputPath, true, options => options
