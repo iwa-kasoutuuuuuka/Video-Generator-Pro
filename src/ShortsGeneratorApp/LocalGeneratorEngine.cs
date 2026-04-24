@@ -48,7 +48,7 @@ namespace ShortsGeneratorApp
                 MaxTokens = 2048,
                 Temperature = 0.7f,
                 TopP = 0.95f,
-                AntiPrompts = new List<string> { "User:", "[INPUT DATA END]" }
+                AntiPrompts = new List<string> { "User:", "[INST]", "<|im_end|>" }
             };
 
             string response = "";

@@ -15,53 +15,50 @@ namespace ShortsGeneratorApp
             _localAI = localAI;
         }
 
+        // プロンプトのテンプレート定義（verbatim文字列のエスケープ問題を回避するため定数化）
+        private const string PromptTemplate =
+            "[ROLE]\n" +
+            "あなたは\"YouTube/Shorts動画の視聴維持率・CTR最適化AI\"です。\n" +
+            "視聴者が最後まで飽きずに視聴し、クリックしたくなる台本とメタデータを生成してください。\n\n" +
+            "[TASK]\n" +
+            "入力されたコンテンツを分析し、YouTubeアルゴリズム（満足度・維持率）に最適化された出力を生成せよ。\n\n" +
+            "[RULES]\n" +
+            "- 導入は最初の5秒で視聴者を引き込む強力なフックを設計すること。\n" +
+            "- 内容は中学生でも理解できる平易かつ、感情を動かすテンポの良い表現にする。\n" +
+            "- 出力は必ず下記のJSON構造に従い、純粋なJSONのみを返せ。\n" +
+            "- 日本語を使用すること。ただしvisual_promptはStable Diffusion向けに英語で記述せよ。\n" +
+            "- 解説・前置き・Markdown記号（```や###）は一切禁止する。\n\n" +
+            "[SUCCESS EXAMPLE]\n" +
+            "{\n" +
+            "  \"titles\": [\"驚愕の真実！\", \"誰も知らない裏技\", \"3分でわかる解説\"],\n" +
+            "  \"thumbnail_texts\": [\"ヤバイ\", \"禁断の手法\"],\n" +
+            "  \"tags\": [\"解説\", \"豆知識\"],\n" +
+            "  \"description\": \"今回の動画では...\",\n" +
+            "  \"hook\": \"ねぇ、これ知ってた？\",\n" +
+            "  \"script_full\": \"こんにちは！今日は...\",\n" +
+            "  \"scenes\": [\n" +
+            "    {\n" +
+            "      \"id\": 1,\n" +
+            "      \"narration\": \"こんにちは！今日は驚きの事実をお伝えします。\",\n" +
+            "      \"visual_prompt\": \"A surprised young woman pointing at a glowing smartphone, cinematic 8k\",\n" +
+            "      \"duration_seconds\": 5\n" +
+            "    }\n" +
+            "  ],\n" +
+            "  \"srt\": \"1\\n00:00:00,000 --> 00:00:05,000\\nこんにちは！\",\n" +
+            "  \"risk_check\": \"なし\"\n" +
+            "}\n\n" +
+            "[STRICT RULE]\n" +
+            "あなたはJSON生成機械です。{ で始まり } で終わるデータ以外を1文字でも出力したらエラーとなります。\n\n" +
+            "[INPUT]\n" +
+            "__INPUT_DATA__";
+
         public async Task<V2GenerationResult> GenerateV2Async(string inputUrlOrText, int duration, string style)
         {
-            // 視聴維持率・CTR最適化プロンプト (v2.0 / v5.0 logic)
-            string prompt = $@"
-[ROLE]
-あなたは「YouTube/Shorts動画の視聴維持率・CTR最適化AI」です。視聴者が最後まで飽きずに視聴し、クリックしたくなる台本とメタデータを生成してください。
-
-[TASK]
-入力されたコンテンツを分析し、YouTubeアルゴリズム（満足度・維持率）に最適化された出力を生成せよ。
-
-[RULES]
-- 導入は最初の5秒で視聴者を引き込む「強力なフック」を設計すること。
-- 内容は中学生でも理解できる平易かつ、感情を動かすテンポの良い表現にする。
-- 出力は必ず以下のJSON構造に従い、純粋なJSONのみを返せ。
-- 言語は日本語を使用すること。ただし `visual_prompt` は画像生成AI（Stable Diffusion）向けに詳細な英語で記述せよ。
-- **解説、前置き、Markdownの枠、### などの記号は一切禁止する。**
-
-[SUCCESS EXAMPLE]
-{{
-  ""titles"": [""驚愕の真実！"", ""誰も知らない裏技"", ""3分でわかる解説""],
-  ""thumbnail_texts"": [""ヤバイ"", ""禁断の手法""],
-  ""tags"": [""解説"", ""豆知識""],
-  ""description"": ""今回の動画では..."",
-  ""hook"": ""ねぇ、これ知ってた？"",
-  ""script_full"": ""こんにちは！今日は..."",
-  ""scenes"": [
-    {{
-      ""id"": 1,
-      ""narration"": ""こんにちは！今日は驚きの事実をお伝えします。"",
-      ""visual_prompt"": ""A surprised young woman pointing at a glowing mysterious smartphone, cinematic lighting, 8k, detailed"",
-      ""duration_seconds"": 5
-    }}
-  ],
-  ""srt"": ""1\n00:00:00,000 --> 00:00:05,000\nこんにちは！今日は驚きの事実をお伝えします。"",
-  ""risk_check"": ""なし""
-}}
-
-[STRICT RULE]
-あなたはJSON生成機械です。`{{` で始まり `}}` で終わるデータ以外を1文字でも出力したらエラーとなります。
-
-[INPUT DATA START]
-{inputUrlOrText}
-[INPUT DATA END]
-";
+            // プロンプト生成：PromptTemplateの__INPUT_DATA__にユーザー入力を差し込む（エスケープ安全）
+            string prompt = PromptTemplate.Replace("__INPUT_DATA__", inputUrlOrText);
 
             V2GenerationResult? finalResult = null;
-            
+
             // JSON壊れ対策：最大3回リトライ
             for (int i = 0; i < 3; i++)
             {
@@ -94,20 +91,45 @@ namespace ShortsGeneratorApp
         {
             if (string.IsNullOrWhiteSpace(input)) return "";
 
-            // 1. Try to find JSON inside markdown code blocks ```json ... ``` or ``` ... ```
-            var match = Regex.Match(input, @"```(?:json)?\s*(\{.*?\})\s*```", RegexOptions.Singleline);
-            if (match.Success) return match.Groups[1].Value.Trim();
-
-            // 2. Find the first '{' and the last '}' to extract the core JSON block
-            int start = input.IndexOf("{");
-            int end = input.LastIndexOf("}");
-
-            if (start != -1 && end != -1 && end > start)
+            // 1. Markdownコードブロック内のJSONを優先的に検出
+            var mdMatch = Regex.Match(input, @"```(?:json)?\s*([\s\S]*?)```", RegexOptions.Singleline);
+            if (mdMatch.Success)
             {
-                return input.Substring(start, end - start + 1).Trim();
+                var candidate = mdMatch.Groups[1].Value.Trim();
+                if (candidate.StartsWith("{")) return candidate;
             }
-            
-            return ""; // JSON not found
+
+            // 2. ブラケットカウント法：最初の'{' からネストを追跡して完全なJSONブロックを抽出
+            int start = -1;
+            int depth = 0;
+            bool inString = false;
+            bool escape = false;
+
+            for (int i = 0; i < input.Length; i++)
+            {
+                char c = input[i];
+
+                if (escape) { escape = false; continue; }
+                if (c == '\\' && inString) { escape = true; continue; }
+                if (c == '"') { inString = !inString; continue; }
+                if (inString) continue;
+
+                if (c == '{')
+                {
+                    if (depth == 0) start = i;
+                    depth++;
+                }
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0 && start != -1)
+                    {
+                        return input.Substring(start, i - start + 1).Trim();
+                    }
+                }
+            }
+
+            return ""; // JSONが見つからない
         }
     }
 
